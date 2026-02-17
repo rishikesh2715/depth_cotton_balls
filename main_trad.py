@@ -206,7 +206,7 @@ for p in img_paths:
         overlay[data["mask"]] = (255, 0, 0)
         img = cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0)
     cv2.rectangle(img, (0,0), (420, 130), (0,0,0), -1)
-    cv2.putText(img, "PINHOLE (Control)", (10,30), font, 0.6, (200,200,200), 1)
+    cv2.putText(img, "Geometric + Neural", (10,30), font, 0.6, (200,200,200), 1)
     cv2.putText(img, f"Real:  {d_true}\"", (10,55), font, 0.8, (0,255,0), 2)
     cv2.putText(img, f"Est:   {est_pin:.1f}\"", (10,85), font, 0.8, (0,255,255), 2)
     cv2.putText(img, f"Error: {abs(est_pin - d_true):.1f}\"", (10,115), font, 0.8, (0,165,255), 2)
