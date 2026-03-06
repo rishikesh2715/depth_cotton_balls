@@ -18,7 +18,7 @@ from sklearn.linear_model import LinearRegression
 # -----------------
 CAP_DIR = "captures"
 OUT_DIR = "model_comparison_output"
-YOLO_WEIGHTS = "best.pt" 
+YOLO_WEIGHTS = "exp.pt" 
 
 # --- Model Selector ---
 # ZoeDepth (The one you were using)
