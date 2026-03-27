@@ -189,12 +189,10 @@ def main():
             )
 
             # ── Preview ──────────────────────────────────────────────────
+            cv2.imshow("RGBD Recorder", display)
             if args.preview_depth:
                 depth_colormap = build_depth_colormap(depth_frame)
-                combined = np.hstack((display, depth_colormap))
-                cv2.imshow("RGBD Recorder", combined)
-            else:
-                cv2.imshow("RGBD Recorder", display)
+                cv2.imshow("Depth Preview", depth_colormap)
 
             # ── Key handling ─────────────────────────────────────────────
             key = cv2.waitKey(1) & 0xFF
