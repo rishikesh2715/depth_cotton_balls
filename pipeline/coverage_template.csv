@@ -1,0 +1,11 @@
+recording_id,bolls_visible,notes
+rec_0deg_low,"5,12,17,23,35,41",example — replace with your real values
+rec_0deg_high,"5,12,23,34,35,41,56",
+rec_45deg_low,"12,17,34,41,56",
+rec_45deg_high,,
+rec_90deg_low,,
+rec_90deg_high,,
+rec_135deg_low,,
+rec_135deg_high,,
+handheld_1,,
+handheld_2,,
