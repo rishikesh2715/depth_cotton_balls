@@ -1,0 +1,117 @@
+[
+  {
+    "name": "boll",
+    "color": "#33ddff",
+    "type": "mask",
+    "attributes": [
+      {
+        "name": "fruit_id",
+        "mutable": true,
+        "input_type": "number",
+        "default_value": "0",
+        "values": ["0", "1", "10000", "1"]
+      },
+      {
+        "name": "fruit_id_confident",
+        "mutable": true,
+        "input_type": "checkbox",
+        "default_value": "true",
+        "values": ["true", "false"]
+      },
+      {
+        "name": "visibility_fraction",
+        "mutable": true,
+        "input_type": "select",
+        "default_value": "1.0",
+        "values": ["1.0", "0.75", "0.5", "0.25", "0.0"]
+      },
+      {
+        "name": "occlusion_type",
+        "mutable": true,
+        "input_type": "select",
+        "default_value": "none",
+        "values": ["none", "leaf", "stem", "other_fruit", "motion_blur", "out_of_frame", "self_occlusion", "tag"]
+      },
+      {
+        "name": "usable_for_size",
+        "mutable": true,
+        "input_type": "checkbox",
+        "default_value": "true",
+        "values": ["true", "false"]
+      },
+      {
+        "name": "boll_stage",
+        "mutable": true,
+        "input_type": "select",
+        "default_value": "unopened",
+        "values": ["unopened", "partially_opened", "opened"]
+      },
+      {
+        "name": "motion_blur",
+        "mutable": true,
+        "input_type": "checkbox",
+        "default_value": "false",
+        "values": ["false", "true"]
+      },
+      {
+        "name": "depth_failure",
+        "mutable": true,
+        "input_type": "checkbox",
+        "default_value": "false",
+        "values": ["false", "true"]
+      },
+      {
+        "name": "lighting_artifact",
+        "mutable": true,
+        "input_type": "checkbox",
+        "default_value": "false",
+        "values": ["false", "true"]
+      }
+    ]
+  },
+  {
+    "name": "kp_base",
+    "color": "#e53935",
+    "type": "points",
+    "attributes": [
+      { "name": "fruit_id", "mutable": true, "input_type": "number", "default_value": "0", "values": ["0", "1", "10000", "1"] },
+      { "name": "visible",  "mutable": true, "input_type": "select", "default_value": "2", "values": ["2", "1", "0"] }
+    ]
+  },
+  {
+    "name": "kp_tip",
+    "color": "#43a047",
+    "type": "points",
+    "attributes": [
+      { "name": "fruit_id", "mutable": true, "input_type": "number", "default_value": "0", "values": ["0", "1", "10000", "1"] },
+      { "name": "visible",  "mutable": true, "input_type": "select", "default_value": "2", "values": ["2", "1", "0"] }
+    ]
+  },
+  {
+    "name": "kp_midpoint",
+    "color": "#fdd835",
+    "type": "points",
+    "attributes": [
+      { "name": "fruit_id", "mutable": true, "input_type": "number", "default_value": "0", "values": ["0", "1", "10000", "1"] },
+      { "name": "visible",  "mutable": true, "input_type": "select", "default_value": "2", "values": ["2", "1", "0"] }
+    ]
+  },
+  {
+    "name": "kp_width_left",
+    "color": "#8e24aa",
+    "type": "points",
+    "attributes": [
+      { "name": "fruit_id", "mutable": true, "input_type": "number", "default_value": "0", "values": ["0", "1", "10000", "1"] },
+      { "name": "visible",  "mutable": true, "input_type": "select", "default_value": "2", "values": ["2", "1", "0"] }
+    ]
+  },
+  {
+    "name": "kp_width_right",
+    "color": "#fb8c00",
+    "type": "points",
+    "attributes": [
+      { "name": "fruit_id", "mutable": true, "input_type": "number", "default_value": "0", "values": ["0", "1", "10000", "1"] },
+      { "name": "visible",  "mutable": true, "input_type": "select", "default_value": "2", "values": ["2", "1", "0"] }
+    ]
+  }
+]
