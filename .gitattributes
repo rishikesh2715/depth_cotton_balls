@@ -1,0 +1,17 @@
+* text=auto
+*.py text
+*.md text
+*.csv text
+*.json text
+*.html text
+*.jpg binary
+*.png binary
+*.npy binary
+*.pt binary
+*.bag binary
+*.mp4 binary
+*.MP4 binary
+*.docx binary
+*.pptx binary
+*.pdf binary
+*.zip binary

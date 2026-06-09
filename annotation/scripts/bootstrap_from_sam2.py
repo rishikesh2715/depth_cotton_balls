@@ -1,7 +1,8 @@
 """
 bootstrap_from_sam2.py — Convert existing SAM 2 per-boll masks into a
-COCO-style JSON that CVAT can import as pre-annotations. This lets
-annotators START with rough masks instead of drawing from scratch.
+COCO-style JSON that CVAT can import as pre-annotations, matching the
+new 3-label schema in annotation/cvat/cvat_labels.json (cotton_boll
+polygon + tip points + base points).
 
 Input:
   - A sample_manifest.csv produced by sample_frames.py
@@ -11,13 +12,16 @@ Output:
   - A single sam2_bootstrap_coco.json that CVAT can import via
     "Upload annotations" → "COCO 1.0".
 
-Notes:
-  - Masks are converted to polygons via OpenCV contour detection.
-  - Small components (< MIN_AREA px) are dropped as noise.
-  - fruit_id (the SAM 2 obj_id = physical tag number) is encoded in the
-    COCO "category_id" trick: we use a SINGLE category ("boll") and write
-    the fruit_id into an extra "attributes" block so annotators see it
-    immediately in CVAT.
+What the bootstrap does and does NOT do:
+  - DOES: write one `cotton_boll` polygon per SAM 2 mask, with boll_id
+    pre-filled from the SAM 2 tag_id. Defaults the other attributes to
+    their most common value (annotation_type=whole_visible,
+    occluded_by=none, tip/base_visibility=visible) — you override per
+    boll in CVAT where wrong.
+  - DOES NOT: place tip / base point annotations. SAM 2 masks don't
+    encode anatomy, so you click those two per boll manually. The
+    cotton_boll `boll_id` value is what you'll type into the tip/base
+    point `boll_id` fields to link them.
 """
 import argparse
 import csv
@@ -112,7 +116,7 @@ def main():
 
         for m_path in sorted(masks_dir.glob("*.png")):
             try:
-                fruit_id = int(m_path.stem)
+                sam2_tag_id = int(m_path.stem)
             except ValueError:
                 continue
             mask = cv2.imread(str(m_path), cv2.IMREAD_GRAYSCALE)
@@ -128,22 +132,17 @@ def main():
             annotations.append({
                 "id": ann_id,
                 "image_id": img_id,
-                "category_id": 1,  # single "boll" category
+                "category_id": 1,  # cotton_boll
                 "segmentation": polys,
                 "bbox": bbox,
                 "area": area_from_polygons(polys),
                 "iscrowd": 0,
                 "attributes": {
-                    "fruit_id": fruit_id,
-                    "fruit_id_confident": True,
-                    "visibility_fraction": "1.0",
-                    "occlusion_type": "none",
-                    "usable_for_size": True,
-                    "boll_stage": "unopened",
-                    "motion_blur": False,
-                    "depth_failure": False,
-                    "lighting_artifact": False,
-                    "source": "sam2_bootstrap",
+                    "boll_id": sam2_tag_id,
+                    "tip_visibility": "visible",
+                    "base_visibility": "visible",
+                    "occluded_by": "none",
+                    "annotation_type": "whole_visible",
                 },
             })
             ann_id += 1
@@ -151,13 +150,19 @@ def main():
 
     coco = {
         "info": {
-            "description": "SAM 2 bootstrap pre-annotations for CVAT",
-            "version": "0.1",
+            "description": "SAM 2 bootstrap pre-annotations for CVAT "
+                           "(cotton_boll polygons only; tip/base points "
+                           "to be added manually during annotation)",
+            "version": "0.2",
         },
         "licenses": [],
         "images": images,
         "annotations": annotations,
-        "categories": [{"id": 1, "name": "boll", "supercategory": "fruit"}],
+        "categories": [
+            {"id": 1, "name": "cotton_boll", "supercategory": ""},
+            {"id": 2, "name": "tip",         "supercategory": ""},
+            {"id": 3, "name": "base",        "supercategory": ""},
+        ],
     }
 
     out_path.parent.mkdir(parents=True, exist_ok=True)

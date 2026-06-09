@@ -1,0 +1,1451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cotton-boll inference viewer</title>
+<style>
+:root {
+  --bg-0: #0c0f14;
+  --bg-1: #131822;
+  --bg-2: #1b2230;
+  --bg-3: #232c3d;
+  --border: #2d384e;
+  --text: #e6ecf5;
+  --text-dim: #9aa6bb;
+  --text-faint: #6b7689;
+  --accent: #4ea1ff;
+  --accent-hot: #6cc1ff;
+  --danger: #ff5c6c;
+  --ok: #3ddc97;
+
+  /* Match the cv2 BGR palette but expressed as RGB */
+  --cls-none:  rgb( 60,220, 60);
+  --cls-leaf:  rgb(220,220, 60);
+  --cls-stem:  rgb(255,165, 60);
+  --cls-other: rgb(220, 60, 60);
+  --cls-noaux: rgb(200,200,200);
+  --kpt-tip:   rgb( 60,220,255);
+  --kpt-base:  rgb(220, 60,220);
+  --axis:      rgb(255,255,255);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; background: var(--bg-0); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px; -webkit-font-smoothing: antialiased; overflow: hidden; }
+
+button, input, select { font-family: inherit; font-size: inherit; color: var(--text); }
+button {
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 12px; cursor: pointer; transition: background .12s, border-color .12s;
+}
+button:hover:not(:disabled) { background: var(--bg-3); border-color: var(--accent); }
+button:disabled { opacity: .4; cursor: not-allowed; }
+button.primary { background: var(--accent); color: #06121f; border-color: var(--accent); font-weight: 600; }
+button.primary:hover { background: var(--accent-hot); border-color: var(--accent-hot); }
+button.icon { padding: 6px 8px; min-width: 32px; }
+
+input[type=range] { accent-color: var(--accent); }
+input[type=number], select {
+  background: var(--bg-1); border: 1px solid var(--border); border-radius: 4px;
+  padding: 3px 6px; width: 70px;
+}
+input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
+label { cursor: pointer; user-select: none; }
+
+/* ---------------------------------- layout --------------------------------- */
+.app {
+  display: grid;
+  grid-template-rows: 48px 1fr 64px;
+  grid-template-columns: 260px 1fr 280px;
+  grid-template-areas:
+    "header header header"
+    "left   canvas right"
+    "footer footer footer";
+  height: 100vh;
+}
+header.topbar {
+  grid-area: header;
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 16px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+}
+header .title { font-weight: 600; font-size: 14px; letter-spacing: .3px; }
+header .title .sub { color: var(--text-dim); font-weight: 400; margin-left: 8px; font-size: 12px; }
+header .spacer { flex: 1; }
+header .stats { color: var(--text-dim); font-size: 12px; }
+header .stats b { color: var(--text); font-weight: 600; }
+
+aside.left {
+  grid-area: left; overflow-y: auto;
+  background: var(--bg-1); border-right: 1px solid var(--border);
+  padding: 14px 14px 30px;
+}
+aside.right {
+  grid-area: right; overflow-y: auto;
+  background: var(--bg-1); border-left: 1px solid var(--border);
+  padding: 14px 14px 30px;
+}
+main.center {
+  grid-area: canvas;
+  position: relative;
+  background:
+    linear-gradient(45deg, #0a0d12 25%, transparent 25%, transparent 75%, #0a0d12 75%),
+    linear-gradient(45deg, #0a0d12 25%, transparent 25%, transparent 75%, #0a0d12 75%);
+  background-color: #11151c;
+  background-size: 24px 24px;
+  background-position: 0 0, 12px 12px;
+  overflow: hidden;
+}
+footer.footer {
+  grid-area: footer;
+  background: var(--bg-1); border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 16px; padding: 0 16px;
+}
+
+/* ----------------------------------- canvas -------------------------------- */
+.canvas-wrap {
+  position: absolute; inset: 0;
+  overflow: hidden;
+}
+.canvas-wrap canvas { position: absolute; left: 0; top: 0; }
+canvas { box-shadow: 0 0 60px rgba(0,0,0,.6); cursor: crosshair; transform-origin: 0 0; }
+canvas.panning { cursor: grabbing; }
+canvas.zoomed   { cursor: grab; }
+canvas.zoomed:active { cursor: grabbing; }
+.empty-state {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: var(--text-dim); text-align: center; padding: 40px;
+}
+.empty-state h2 { color: var(--text); margin: 0 0 8px; font-size: 20px; font-weight: 500; }
+.empty-state p { margin: 4px 0; max-width: 460px; line-height: 1.5; }
+.empty-state .load-btns { margin-top: 22px; display: flex; gap: 10px; }
+.empty-state .hint { font-size: 11px; color: var(--text-faint); margin-top: 18px; }
+.toast {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+  background: var(--bg-3); border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 16px; max-width: 80%; z-index: 10;
+  box-shadow: 0 6px 28px rgba(0,0,0,.5);
+}
+.toast.err { border-color: var(--danger); color: var(--danger); }
+.toast.ok  { border-color: var(--ok); color: var(--ok); }
+.loading-bar {
+  position: absolute; top: 0; left: 0; height: 3px;
+  background: var(--accent); transition: width .15s;
+  z-index: 20;
+}
+
+/* ---------------------------------- sidebars ------------------------------- */
+.section { margin-bottom: 18px; }
+.section h3 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--text-faint); margin: 0 0 8px; font-weight: 600;
+}
+.toggle-row, .filter-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 0;
+}
+.toggle-row label { flex: 1; }
+.toggle-row .swatch {
+  display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+  vertical-align: middle; margin-right: 6px;
+}
+.indent { padding-left: 18px; }
+.filter-row { flex-wrap: wrap; }
+.filter-row .val { color: var(--text-dim); font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
+.divider { height: 1px; background: var(--border); margin: 12px 0; }
+
+.class-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 8px; border-radius: 999px;
+  background: var(--bg-2); border: 1px solid var(--border);
+  font-size: 11px; cursor: pointer; user-select: none;
+}
+.class-chip.off { opacity: .35; }
+.class-chip .dot { width: 8px; height: 8px; border-radius: 999px; }
+.class-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+
+/* ---------------------------------- footer --------------------------------- */
+.footer .play-btn { width: 42px; height: 42px; border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent); color: #06121f; border: none; font-size: 18px; }
+.footer .play-btn:hover { background: var(--accent-hot); }
+.footer .scrub-wrap { flex: 1; display: flex; align-items: center; gap: 10px; }
+.footer .scrub { flex: 1; }
+.footer .frame-counter {
+  font-variant-numeric: tabular-nums; font-size: 12px; color: var(--text-dim);
+  min-width: 110px; text-align: right;
+}
+.footer .frame-counter b { color: var(--text); }
+.footer .speed { min-width: 64px; }
+.footer .stepper-btn { width: 32px; height: 32px; padding: 0; }
+
+/* ----------------------------------- details ------------------------------- */
+.details-empty { color: var(--text-faint); font-size: 12px; padding: 16px 4px; line-height: 1.5; }
+.detail-row {
+  display: flex; justify-content: space-between;
+  padding: 4px 0; border-bottom: 1px solid var(--bg-3);
+  font-size: 12px;
+}
+.detail-row .k { color: var(--text-dim); }
+.detail-row .v { font-variant-numeric: tabular-nums; color: var(--text); }
+.detail-class { font-weight: 600; padding: 6px 0; }
+.bar {
+  height: 6px; background: var(--bg-2); border-radius: 99px; overflow: hidden; margin: 3px 0 8px;
+}
+.bar .fill { height: 100%; background: var(--accent); }
+.legend {
+  margin-top: 14px;
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 11px; color: var(--text-dim);
+}
+.legend .item { display: flex; align-items: center; gap: 6px; }
+.legend .item .swatch { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+
+/* ----------------------------------- misc ---------------------------------- */
+.kbd {
+  display: inline-block; padding: 1px 5px;
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-bottom-width: 2px; border-radius: 3px;
+  font-family: ui-monospace, "SF Mono", monospace; font-size: 11px;
+  color: var(--text-dim);
+}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border); }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============================== TOP BAR =============================== -->
+  <header class="topbar">
+    <div class="title">Cotton-boll inference viewer<span class="sub">v1</span></div>
+    <div class="spacer"></div>
+    <div class="stats" id="stats"></div>
+    <button id="load-frames-btn">Load frames</button>
+    <button id="load-dets-btn">Load detections</button>
+    <button class="icon" id="help-btn" title="Keyboard shortcuts">?</button>
+  </header>
+
+  <!-- ============================== LEFT PANEL ============================ -->
+  <aside class="left">
+
+    <div class="section">
+      <h3>Layers</h3>
+      <div class="toggle-row"><input type="checkbox" id="t-bbox" checked><label for="t-bbox">Bounding box</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-mask-fill" checked><label for="t-mask-fill">Mask fill</label></div>
+      <div class="filter-row indent">
+        <label for="mask-alpha">Alpha</label>
+        <input type="range" id="mask-alpha" min="0" max="1" step="0.05" value="0.35" style="flex:1">
+        <span class="val" id="mask-alpha-v">0.35</span>
+      </div>
+      <div class="toggle-row"><input type="checkbox" id="t-mask-outline" checked><label for="t-mask-outline">Mask outline</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-kpt-tip" checked><label for="t-kpt-tip"><span class="swatch" style="background:var(--kpt-tip)"></span>Tip keypoint</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-kpt-base" checked><label for="t-kpt-base"><span class="swatch" style="background:var(--kpt-base)"></span>Base keypoint</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-axis" checked><label for="t-axis"><span class="swatch" style="background:var(--axis); border:1px solid var(--border)"></span>Axis line</label></div>
+      <div class="filter-row indent">
+        <label for="kpt-conf-min" style="flex:1">Kpt conf threshold</label>
+        <span class="val" id="kpt-conf-min-v">0.30</span>
+      </div>
+      <input type="range" id="kpt-conf-min" min="0" max="1" step="0.01" value="0.30" style="width:100%">
+      <div style="font-size:10px; color:var(--text-faint); margin-top:2px; line-height:1.4">
+        Above threshold = filled (model committed). Below = hollow (low conf / guessed).
+      </div>
+      <div class="toggle-row"><input type="checkbox" id="t-track-id" checked><label for="t-track-id">Track-ID badge</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-trails"><label for="t-trails">Centroid trails (tracked)</label></div>
+      <div class="filter-row indent">
+        <label for="trail-len" style="flex:1">Trail length (frames)</label>
+        <span class="val" id="trail-len-v">20</span>
+      </div>
+      <input type="range" id="trail-len" min="3" max="80" step="1" value="20" style="width:100%">
+      <div class="toggle-row"><input type="checkbox" id="t-label" checked><label for="t-label">Label text</label></div>
+      <div class="indent">
+        <div class="toggle-row"><input type="checkbox" id="t-lbl-cls" checked><label for="t-lbl-cls">occ class + conf</label></div>
+        <div class="toggle-row"><input type="checkbox" id="t-lbl-v" checked><label for="t-lbl-v">visfrac (v=...)</label></div>
+        <div class="toggle-row"><input type="checkbox" id="t-lbl-d" checked><label for="t-lbl-d">det conf (d=...)</label></div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section">
+      <h3>Filters</h3>
+      <div class="filter-row">
+        <label for="conf-min" style="flex:1">Min det conf</label>
+        <span class="val" id="conf-min-v">0.25</span>
+      </div>
+      <input type="range" id="conf-min" min="0" max="1" step="0.01" value="0.25" style="width:100%">
+
+      <div class="filter-row" style="margin-top:8px">
+        <label for="vis-min" style="flex:1">Min visfrac</label>
+        <span class="val" id="vis-min-v">0.00</span>
+      </div>
+      <input type="range" id="vis-min" min="0" max="1" step="0.01" value="0.00" style="width:100%">
+
+      <div class="filter-row" style="margin-top:10px"><label>Occlusion class</label></div>
+      <div class="class-chips" id="class-chips">
+        <span class="class-chip" data-cls="none"><span class="dot" style="background:var(--cls-none)"></span>none</span>
+        <span class="class-chip" data-cls="leaf"><span class="dot" style="background:var(--cls-leaf)"></span>leaf</span>
+        <span class="class-chip" data-cls="stem"><span class="dot" style="background:var(--cls-stem)"></span>stem</span>
+        <span class="class-chip" data-cls="other"><span class="dot" style="background:var(--cls-other)"></span>other</span>
+        <span class="class-chip" data-cls="_noaux"><span class="dot" style="background:var(--cls-noaux)"></span>no aux</span>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section">
+      <h3>View</h3>
+      <div class="toggle-row"><input type="checkbox" id="t-dim-unsel"><label for="t-dim-unsel">Dim non-selected</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-fit" checked><label for="t-fit">Fit to window</label></div>
+      <div class="filter-row" style="margin-top:6px">
+        <button id="snap-btn" style="flex:1">Save current frame as PNG</button>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section">
+      <h3>Zoom</h3>
+      <div class="filter-row">
+        <button id="zoom-out-btn" class="icon" title="Zoom out">−</button>
+        <span class="val" id="zoom-display" style="flex:1; text-align:center; font-variant-numeric:tabular-nums">100%</span>
+        <button id="zoom-in-btn" class="icon" title="Zoom in">+</button>
+      </div>
+      <div class="filter-row" style="margin-top:6px">
+        <button id="zoom-fit-btn" style="flex:1">Fit window</button>
+        <button id="zoom-100-btn" style="flex:1">100%</button>
+      </div>
+      <div style="font-size:10px; color:var(--text-faint); margin-top:6px; line-height:1.5">
+        Scroll wheel = zoom at cursor. Click + drag = pan. <span class="kbd">0</span> = reset to fit.
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============================== CANVAS ================================ -->
+  <main class="center">
+    <div class="canvas-wrap">
+      <canvas id="cv" width="800" height="600"></canvas>
+    </div>
+    <div class="loading-bar" id="loading-bar" style="display:none"></div>
+    <div class="empty-state" id="empty-state">
+      <h2>Load an inference run</h2>
+      <p>Pick a folder of <b>original (un-annotated) frames</b>, then a folder of
+        <b>per-frame JSON detections</b> (the output of <code>infer_v3.py --save-json</code>).</p>
+      <p>If both are in the <i>same</i> folder, just pick it once with "Load frames".</p>
+      <div class="load-btns">
+        <button class="primary" id="load-frames-btn-2">Load frames folder</button>
+        <button id="load-dets-btn-2">Load detections folder</button>
+      </div>
+      <div class="hint">
+        Tested on Chrome / Edge. Supports drag-and-drop too — drop a folder anywhere on this window.
+      </div>
+    </div>
+    <div class="toast" id="toast" style="display:none"></div>
+  </main>
+
+  <!-- ============================== RIGHT PANEL =========================== -->
+  <aside class="right">
+    <div class="section">
+      <h3>Selection</h3>
+      <div id="details">
+        <div class="details-empty">
+          Click any boll on the canvas to see its full per-detection record here.
+        </div>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="section">
+      <h3>Class legend</h3>
+      <div class="legend">
+        <div class="item"><span class="swatch" style="background:var(--cls-none)"></span>none — unobstructed</div>
+        <div class="item"><span class="swatch" style="background:var(--cls-leaf)"></span>leaf — leaf occlusion</div>
+        <div class="item"><span class="swatch" style="background:var(--cls-stem)"></span>stem — stem / branch occlusion</div>
+        <div class="item"><span class="swatch" style="background:var(--cls-other)"></span>other — edge / other boll</div>
+        <div class="item"><span class="swatch" style="background:var(--cls-noaux)"></span>no aux — aux head not run</div>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="section">
+      <h3>Frame stats</h3>
+      <div id="frame-stats" class="details-empty">No frame loaded.</div>
+    </div>
+  </aside>
+
+  <!-- ============================== FOOTER ================================ -->
+  <footer class="footer">
+    <button class="stepper-btn" id="first-btn" title="First frame (Home)">⏮</button>
+    <button class="stepper-btn" id="prev-btn" title="Prev frame (Left)">◀</button>
+    <button class="play-btn" id="play-btn" title="Play / Pause (Space)">▶</button>
+    <button class="stepper-btn" id="next-btn" title="Next frame (Right)">▶</button>
+    <button class="stepper-btn" id="last-btn" title="Last frame (End)">⏭</button>
+
+    <div class="scrub-wrap">
+      <input type="range" id="scrub" class="scrub" min="0" max="0" value="0">
+      <span class="frame-counter" id="counter"><b>0</b> / 0</span>
+    </div>
+
+    <label for="speed-sel" style="color:var(--text-dim)">Speed</label>
+    <select id="speed-sel" class="speed">
+      <option value="0.25">0.25x</option>
+      <option value="0.5">0.5x</option>
+      <option value="1" selected>1x</option>
+      <option value="2">2x</option>
+      <option value="4">4x</option>
+      <option value="8">8x</option>
+    </select>
+    <label for="fps-input" style="color:var(--text-dim)">FPS</label>
+    <input type="number" id="fps-input" value="15" min="1" max="120" step="1" style="width:54px">
+  </footer>
+</div>
+
+<script>
+// =============================================================================
+//   STATE
+// =============================================================================
+const state = {
+  frames: [],          // [{ name, stem, imageBitmap, image (HTMLImageElement), width, height, detections }]
+  framesIndexByStem: new Map(),
+  current: 0,
+  playing: false,
+  baseFps: 15,
+  speed: 1,
+  lastFrameTime: 0,
+  // toggles
+  layers: {
+    bbox: true, maskFill: true, maskOutline: true,
+    tip: true, base: true, axis: true,
+    label: true, lblCls: true, lblV: true, lblD: true,
+    trackId: true, trails: false,
+  },
+  // filters
+  filters: {
+    confMin: 0.25,
+    visMin: 0.0,
+    kptConfMin: 0.30,
+    classes: new Set(["none","leaf","stem","other","_noaux"]),
+  },
+  // view
+  view: {
+    dimUnselected: false,
+    fitToWindow: true,
+    maskAlpha: 0.35,
+    trailLen: 20,
+    zoom: 1.0,        // CSS scale factor applied to canvas
+    panX: 0,          // CSS translateX in CSS pixels
+    panY: 0,          // CSS translateY in CSS pixels
+  },
+  // selection
+  selectedBollIdx: null,
+};
+
+// Color palette (RGB; matches CV2 BGR palette flipped).
+const COLOR_BY_CLASS = {
+  "none":   "rgb(60,220,60)",
+  "leaf":   "rgb(220,220,60)",
+  "stem":   "rgb(255,165,60)",
+  "other":  "rgb(220,60,60)",
+  "_noaux": "rgb(200,200,200)",
+};
+const COLOR_TIP  = "rgb(60,220,255)";
+const COLOR_BASE = "rgb(220,60,220)";
+const COLOR_AXIS = "rgb(255,255,255)";
+
+const IMG_EXTS = new Set(["jpg","jpeg","png","bmp","tif","tiff","webp"]);
+
+// =============================================================================
+//   DOM
+// =============================================================================
+const $ = (id) => document.getElementById(id);
+const cv = $("cv");
+const ctx = cv.getContext("2d");
+const emptyState = $("empty-state");
+const toast = $("toast");
+const loadingBar = $("loading-bar");
+
+// =============================================================================
+//   LOADING
+// =============================================================================
+async function pickFolder(role) {
+  // role = "frames" | "dets"
+  let entries;
+  if (window.showDirectoryPicker) {
+    try {
+      const dir = await window.showDirectoryPicker();
+      entries = await collectFromHandle(dir);
+    } catch (e) {
+      if (e.name === "AbortError") return;
+      showToast("Folder picker error: " + e.message, "err");
+      return;
+    }
+  } else {
+    // Fallback for older browsers: input[type=file] webkitdirectory
+    entries = await collectViaInput();
+    if (!entries) return;
+  }
+  await ingestEntries(entries, role);
+}
+
+async function collectFromHandle(dirHandle, basePath = "") {
+  const out = [];
+  for await (const [name, handle] of dirHandle.entries()) {
+    if (handle.kind === "directory") {
+      const sub = await collectFromHandle(handle, basePath + name + "/");
+      out.push(...sub);
+    } else if (handle.kind === "file") {
+      const f = await handle.getFile();
+      out.push({ name, path: basePath + name, file: f });
+    }
+  }
+  return out;
+}
+
+function collectViaInput() {
+  return new Promise((resolve) => {
+    const inp = document.createElement("input");
+    inp.type = "file";
+    inp.multiple = true;
+    inp.webkitdirectory = true;
+    inp.addEventListener("change", () => {
+      const arr = [];
+      for (const f of inp.files) {
+        arr.push({ name: f.name, path: f.webkitRelativePath || f.name, file: f });
+      }
+      resolve(arr);
+    });
+    inp.addEventListener("cancel", () => resolve(null));
+    inp.click();
+  });
+}
+
+function extOf(name) {
+  const m = name.toLowerCase().match(/\.([^.]+)$/);
+  return m ? m[1] : "";
+}
+function stemOf(name) {
+  return name.replace(/\.[^.]+$/, "");
+}
+
+async function ingestEntries(entries, role) {
+  setLoading(0);
+  const imageEntries = entries.filter(e => IMG_EXTS.has(extOf(e.name)));
+  const jsonEntries = entries.filter(e => extOf(e.name) === "json");
+
+  // Heuristic: if role is "frames" but the folder contains BOTH images and JSONs,
+  // ingest both — common case where infer_v3.py output is shown alongside source frames.
+  let didImages = false, didDets = false;
+
+  if (role === "frames" && imageEntries.length) {
+    await ingestImages(imageEntries);
+    didImages = true;
+  }
+  if (role === "dets" && jsonEntries.length) {
+    await ingestDetections(jsonEntries);
+    didDets = true;
+  }
+  // Convenience: if you picked one folder and it has both, load both.
+  if (role === "frames" && jsonEntries.length && !didDets) {
+    await ingestDetections(jsonEntries);
+    didDets = true;
+  }
+  if (role === "dets" && imageEntries.length && !didImages && state.frames.length === 0) {
+    await ingestImages(imageEntries);
+    didImages = true;
+  }
+
+  setLoading(null);
+
+  const msg = [];
+  if (didImages) msg.push(`${imageEntries.length} frame(s)`);
+  if (didDets)   msg.push(`${jsonEntries.length} detection file(s)`);
+  if (msg.length === 0) {
+    showToast("No image or JSON files found in selection.", "err");
+    return;
+  }
+  showToast("Loaded " + msg.join(" + "), "ok");
+  updateAfterLoad();
+}
+
+async function ingestImages(imageEntries) {
+  // Build/extend state.frames in sorted order by path stem.
+  imageEntries.sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }));
+  const newFrames = [];
+  let i = 0;
+  for (const e of imageEntries) {
+    const stem = stemOf(e.name);
+    if (state.framesIndexByStem.has(stem)) {
+      // Update existing
+      const idx = state.framesIndexByStem.get(stem);
+      const url = URL.createObjectURL(e.file);
+      state.frames[idx].imageUrl = url;
+      state.frames[idx].imageLoaded = false;
+    } else {
+      const url = URL.createObjectURL(e.file);
+      newFrames.push({
+        name: e.name, stem, path: e.path,
+        imageUrl: url, imageLoaded: false, image: null,
+        width: 0, height: 0,
+        detections: [],
+      });
+    }
+    i++;
+    if (i % 25 === 0) setLoading(i / imageEntries.length * 0.4);
+  }
+  for (const f of newFrames) {
+    state.frames.push(f);
+    state.framesIndexByStem.set(f.stem, state.frames.length - 1);
+  }
+  // Sort frames by stem (natural sort) — keeps index stable across loads.
+  state.frames.sort((a, b) => a.stem.localeCompare(b.stem, undefined, { numeric: true }));
+  state.framesIndexByStem.clear();
+  state.frames.forEach((f, idx) => state.framesIndexByStem.set(f.stem, idx));
+}
+
+async function ingestDetections(jsonEntries) {
+  let n = 0;
+  for (const e of jsonEntries) {
+    try {
+      const text = await e.file.text();
+      const data = JSON.parse(text);
+      const stem = stemOf(e.name);
+      // Two valid shapes:
+      //   (a) image-mode: list of per-boll records           -> attach to frame named <stem>
+      //   (b) video-mode: list of {frame, src, bolls: [...]} -> create one frame per element
+      if (Array.isArray(data) && data.length && data[0] && Array.isArray(data[0].bolls)) {
+        // video-mode JSON
+        for (const rec of data) {
+          // src may be set; fall back to <stem>_<frame_idx>
+          const fStem = rec.src ? stemOf(rec.src.split("/").pop().split("\\").pop())
+                                : `${stem}_${String(rec.frame).padStart(6, "0")}`;
+          let idx = state.framesIndexByStem.get(fStem);
+          if (idx === undefined) {
+            state.frames.push({
+              name: fStem, stem: fStem, path: fStem,
+              imageUrl: null, imageLoaded: false, image: null,
+              width: 0, height: 0, detections: [],
+            });
+            idx = state.frames.length - 1;
+            state.framesIndexByStem.set(fStem, idx);
+          }
+          state.frames[idx].detections = rec.bolls;
+        }
+      } else if (Array.isArray(data)) {
+        // image-mode JSON (flat per-boll list)
+        let idx = state.framesIndexByStem.get(stem);
+        if (idx === undefined) {
+          state.frames.push({
+            name: stem, stem, path: stem,
+            imageUrl: null, imageLoaded: false, image: null,
+            width: 0, height: 0, detections: data,
+          });
+          state.framesIndexByStem.set(stem, state.frames.length - 1);
+        } else {
+          state.frames[idx].detections = data;
+        }
+      }
+      n++;
+      if (n % 25 === 0) setLoading(0.4 + n / jsonEntries.length * 0.5);
+    } catch (err) {
+      console.warn("Failed to parse", e.name, err);
+    }
+  }
+  // Re-sort and rebuild index after potentially adding new frames.
+  state.frames.sort((a, b) => a.stem.localeCompare(b.stem, undefined, { numeric: true }));
+  state.framesIndexByStem.clear();
+  state.frames.forEach((f, idx) => state.framesIndexByStem.set(f.stem, idx));
+}
+
+function updateAfterLoad() {
+  if (state.frames.length === 0) return;
+  emptyState.style.display = "none";
+  state.current = Math.min(state.current, state.frames.length - 1);
+  $("scrub").max = String(state.frames.length - 1);
+  $("scrub").value = String(state.current);
+  goToFrame(state.current, true);
+  updateHeaderStats();
+}
+
+function updateHeaderStats() {
+  const n = state.frames.length;
+  const withDet = state.frames.filter(f => f.detections.length > 0).length;
+  const withImg = state.frames.filter(f => f.imageUrl).length;
+  $("stats").innerHTML = `<b>${n}</b> frame(s) · <b>${withImg}</b> with image · <b>${withDet}</b> with detections`;
+}
+
+// =============================================================================
+//   IMAGE LOAD (lazy)
+// =============================================================================
+async function ensureImageLoaded(frame) {
+  if (frame.imageLoaded || !frame.imageUrl) return;
+  await new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      frame.image = img;
+      frame.width = img.naturalWidth;
+      frame.height = img.naturalHeight;
+      frame.imageLoaded = true;
+      resolve();
+    };
+    img.onerror = () => { frame.imageLoaded = true; resolve(); };
+    img.src = frame.imageUrl;
+  });
+}
+
+// =============================================================================
+//   RENDERING
+// =============================================================================
+function passesFilter(d) {
+  const dc = d.det_conf ?? 0;
+  if (dc < state.filters.confMin) return false;
+  const v = d.visfrac;
+  if (v != null && v < state.filters.visMin) return false;
+  const cls = d.occ_class ?? "_noaux";
+  if (!state.filters.classes.has(cls)) return false;
+  return true;
+}
+
+function colorFor(d) {
+  return COLOR_BY_CLASS[d.occ_class ?? "_noaux"] || COLOR_BY_CLASS["_noaux"];
+}
+
+function centroidOf(d) {
+  if (d.mask_poly && d.mask_poly.length) {
+    let sx = 0, sy = 0;
+    for (const [x, y] of d.mask_poly) { sx += x; sy += y; }
+    return [sx / d.mask_poly.length, sy / d.mask_poly.length];
+  }
+  if (d.bbox) {
+    return [d.bbox[0] + d.bbox[2] / 2, d.bbox[1] + d.bbox[3] / 2];
+  }
+  return null;
+}
+
+function drawTrails(ctx, currentIdx, length, lw) {
+  // Walk back `length` frames, group detections by track_id, draw a
+  // fading polyline from oldest to newest. Only detections with a
+  // track_id show a trail; detections without one are skipped.
+  const start = Math.max(0, currentIdx - length);
+  // track_id -> [{idx, [x, y], color}]
+  const byTrack = new Map();
+  for (let i = start; i <= currentIdx; i++) {
+    const fr = state.frames[i];
+    if (!fr || !fr.detections) continue;
+    for (const d of fr.detections) {
+      if (d.track_id == null) continue;
+      if (!passesFilter(d)) continue;
+      const c = centroidOf(d);
+      if (!c) continue;
+      if (!byTrack.has(d.track_id)) byTrack.set(d.track_id, []);
+      byTrack.get(d.track_id).push({ idx: i, pt: c, color: colorFor(d) });
+    }
+  }
+  ctx.save();
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  const trailLw = Math.max(2, lw * 1.2);
+  for (const points of byTrack.values()) {
+    if (points.length < 2) continue;
+    // Draw segments with fading alpha (newest segment most opaque).
+    for (let k = 1; k < points.length; k++) {
+      const a = points[k - 1], b = points[k];
+      // alpha based on distance from current frame
+      const distFromNow = currentIdx - b.idx;
+      const alpha = Math.max(0.08, 1.0 - distFromNow / Math.max(1, length));
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = b.color;
+      ctx.lineWidth = trailLw;
+      ctx.beginPath();
+      ctx.moveTo(a.pt[0], a.pt[1]);
+      ctx.lineTo(b.pt[0], b.pt[1]);
+      ctx.stroke();
+    }
+    // Small dot at the current centroid (head of the trail)
+    const last = points[points.length - 1];
+    if (last.idx === currentIdx) {
+      ctx.globalAlpha = 1.0;
+      ctx.fillStyle = last.color;
+      ctx.beginPath();
+      ctx.arc(last.pt[0], last.pt[1], Math.max(3, trailLw * 0.6), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+function pointInPoly(px, py, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1];
+    const xj = poly[j][0], yj = poly[j][1];
+    const intersect = ((yi > py) !== (yj > py)) &&
+      (px < (xj - xi) * (py - yi) / ((yj - yi) || 1e-9) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+function pointInBbox(px, py, [x, y, w, h]) {
+  return px >= x && py >= y && px <= x + w && py <= y + h;
+}
+
+function fitCanvas(frame) {
+  // Canvas pixel buffer is always the native image size. Visual sizing +
+  // panning is done with CSS transform so the buffer stays sharp at any zoom.
+  const W = frame.width || cv.width;
+  const H = frame.height || cv.height;
+  if (cv.width !== W || cv.height !== H) {
+    cv.width = W;
+    cv.height = H;
+  }
+  cv.style.width  = W + "px";
+  cv.style.height = H + "px";
+
+  // When in fit-to-window mode, recompute zoom + center on every frame.
+  if (state.view.fitToWindow) {
+    const wrap = cv.parentElement;
+    const wrapW = wrap.clientWidth;
+    const wrapH = wrap.clientHeight;
+    state.view.zoom = Math.min(wrapW / W, wrapH / H, 1);   // never enlarge in fit mode
+    state.view.panX = (wrapW - W * state.view.zoom) / 2;
+    state.view.panY = (wrapH - H * state.view.zoom) / 2;
+  }
+  applyTransform();
+}
+
+function applyTransform() {
+  const z = state.view.zoom;
+  const px = state.view.panX;
+  const py = state.view.panY;
+  cv.style.transform = `translate(${px}px, ${py}px) scale(${z})`;
+  const zd = document.getElementById("zoom-display");
+  if (zd) zd.textContent = `${Math.round(z * 100)}%`;
+  // Cursor hint: grabbable when not in fit mode
+  if (state.view.fitToWindow) {
+    cv.classList.remove("zoomed");
+  } else {
+    cv.classList.add("zoomed");
+  }
+}
+
+function setZoomAtPoint(newZoom, cursorWrapX, cursorWrapY) {
+  // Anchor newZoom so the image pixel under (cursorWrapX, cursorWrapY) — both
+  // in canvas-wrap coords — stays under the cursor after the zoom change.
+  const z1 = state.view.zoom;
+  newZoom = Math.max(0.05, Math.min(20, newZoom));
+  // image pixel currently under the cursor
+  const imgX = (cursorWrapX - state.view.panX) / z1;
+  const imgY = (cursorWrapY - state.view.panY) / z1;
+  state.view.panX = cursorWrapX - imgX * newZoom;
+  state.view.panY = cursorWrapY - imgY * newZoom;
+  state.view.zoom = newZoom;
+  state.view.fitToWindow = false;
+  const fitToggle = document.getElementById("t-fit");
+  if (fitToggle) fitToggle.checked = false;
+  applyTransform();
+}
+
+function resetToFit() {
+  state.view.fitToWindow = true;
+  const fitToggle = document.getElementById("t-fit");
+  if (fitToggle) fitToggle.checked = true;
+  render(); // fitCanvas inside render() will recompute
+}
+
+function setZoomFromCenter(newZoom) {
+  const wrap = cv.parentElement;
+  setZoomAtPoint(newZoom, wrap.clientWidth / 2, wrap.clientHeight / 2);
+}
+
+function render() {
+  const f = state.frames[state.current];
+  if (!f) return;
+  fitCanvas(f);
+
+  // Background: image OR dark fill if no image available.
+  if (f.image) {
+    ctx.drawImage(f.image, 0, 0, cv.width, cv.height);
+  } else {
+    ctx.fillStyle = "#11151c";
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle = "#374055";
+    ctx.font = `${Math.max(14, cv.width / 80)}px sans-serif`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("(no source image for this frame)", cv.width / 2, cv.height / 2);
+  }
+
+  const dets = (f.detections || []).map((d, i) => ({ d, i, ok: passesFilter(d) }));
+  const visible = dets.filter(x => x.ok);
+
+  const lw = Math.max(2, Math.min(cv.width, cv.height) / 600);
+  const fs = Math.max(11, Math.min(cv.width, cv.height) / 60);
+
+  // 0) Centroid trails (drawn behind everything else)
+  if (state.layers.trails) {
+    drawTrails(ctx, state.current, state.view.trailLen, lw);
+  }
+
+  // 1) Mask fills (alpha)
+  if (state.layers.maskFill) {
+    ctx.save();
+    ctx.globalAlpha = state.view.maskAlpha;
+    for (const { d } of visible) {
+      const poly = d.mask_poly;
+      if (!poly || poly.length < 3) continue;
+      ctx.fillStyle = colorFor(d);
+      ctx.beginPath();
+      ctx.moveTo(poly[0][0], poly[0][1]);
+      for (let k = 1; k < poly.length; k++) ctx.lineTo(poly[k][0], poly[k][1]);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // 2) Per-detection overlays
+  for (const { d, i } of visible) {
+    const color = colorFor(d);
+    const isSel = (state.selectedBollIdx === i);
+    const dimmed = state.view.dimUnselected && state.selectedBollIdx != null && !isSel;
+    ctx.save();
+    ctx.globalAlpha = dimmed ? 0.25 : 1.0;
+
+    // Mask outline
+    if (state.layers.maskOutline && d.mask_poly && d.mask_poly.length >= 3) {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = isSel ? lw * 2 : lw;
+      ctx.beginPath();
+      ctx.moveTo(d.mask_poly[0][0], d.mask_poly[0][1]);
+      for (let k = 1; k < d.mask_poly.length; k++) ctx.lineTo(d.mask_poly[k][0], d.mask_poly[k][1]);
+      ctx.closePath();
+      ctx.stroke();
+    }
+
+    // Bbox
+    if (state.layers.bbox && d.bbox) {
+      const [x, y, w, h] = d.bbox;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = isSel ? lw * 2 : lw;
+      ctx.setLineDash(isSel ? [] : []);
+      ctx.strokeRect(x, y, w, h);
+    }
+
+    // Keypoints + axis. kpts[i][2] is per-kpt confidence (continuous).
+    // >= kptConfMin -> filled (model committed). 0 < x < kptConfMin -> hollow (guessed).
+    const kpts = d.kpts || [];
+    const tip = kpts[0]; const base = kpts[1];
+    const kThresh = state.filters.kptConfMin;
+    const tipConf = tip ? tip[2] : 0;
+    const baseConf = base ? base[2] : 0;
+    const tipShow = tip && tipConf > 0;
+    const baseShow = base && baseConf > 0;
+    const tipCommitted = tipConf >= kThresh;
+    const baseCommitted = baseConf >= kThresh;
+    if (state.layers.axis && tipCommitted && baseCommitted) {
+      ctx.strokeStyle = COLOR_AXIS;
+      ctx.lineWidth = Math.max(1, lw * 0.7);
+      ctx.beginPath();
+      ctx.moveTo(tip[0], tip[1]);
+      ctx.lineTo(base[0], base[1]);
+      ctx.stroke();
+    }
+    const kr = Math.max(5, lw * 2.2);
+    if (state.layers.tip && tipShow) {
+      ctx.beginPath(); ctx.arc(tip[0], tip[1], kr, 0, Math.PI * 2);
+      if (tipCommitted) {
+        ctx.fillStyle = COLOR_TIP; ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,0.5)"; ctx.lineWidth = 1; ctx.stroke();
+      } else {
+        ctx.strokeStyle = COLOR_TIP; ctx.lineWidth = Math.max(1.5, lw * 0.7);
+        ctx.stroke();
+      }
+    }
+    if (state.layers.base && baseShow) {
+      ctx.beginPath(); ctx.arc(base[0], base[1], kr, 0, Math.PI * 2);
+      if (baseCommitted) {
+        ctx.fillStyle = COLOR_BASE; ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,0.5)"; ctx.lineWidth = 1; ctx.stroke();
+      } else {
+        ctx.strokeStyle = COLOR_BASE; ctx.lineWidth = Math.max(1.5, lw * 0.7);
+        ctx.stroke();
+      }
+    }
+
+    // Track-id chip (top-right of bbox)
+    if (state.layers.trackId && d.track_id != null && d.bbox) {
+      const tag = `#${d.track_id}`;
+      ctx.font = `600 ${Math.max(10, fs * 0.85)}px ui-monospace, "SF Mono", monospace`;
+      const tw_ = ctx.measureText(tag).width;
+      const th_ = fs * 0.85;
+      const [bx_, by_, bw_, bh_] = d.bbox;
+      const cx0 = bx_ + bw_ - tw_ - 8;
+      const cy0 = by_;
+      ctx.fillStyle = "rgba(0,0,0,0.65)";
+      ctx.fillRect(cx0 - 4, cy0, tw_ + 8, th_ + 6);
+      ctx.strokeStyle = color; ctx.lineWidth = Math.max(1, lw / 2);
+      ctx.strokeRect(cx0 - 4, cy0, tw_ + 8, th_ + 6);
+      ctx.fillStyle = color;
+      ctx.textBaseline = "top"; ctx.textAlign = "left";
+      ctx.fillText(tag, cx0, cy0 + 3);
+    }
+
+    // Label
+    if (state.layers.label && d.bbox) {
+      const parts = [];
+      if (state.layers.lblCls && d.occ_class != null)
+        parts.push(`${d.occ_class} ${(d.occ_class_conf ?? 0).toFixed(2)}`);
+      if (state.layers.lblV && d.visfrac != null)
+        parts.push(`v=${d.visfrac.toFixed(2)}`);
+      if (state.layers.lblD && d.det_conf != null)
+        parts.push(`d=${d.det_conf.toFixed(2)}`);
+      const text = parts.join(" | ");
+      if (text) {
+        ctx.font = `600 ${fs}px -apple-system, "Segoe UI", sans-serif`;
+        const tw = ctx.measureText(text).width;
+        const th = fs * 1.25;
+        const [bx, by] = d.bbox;
+        const lx = bx;
+        const ly = Math.max(th + 2, by - 4);
+        ctx.fillStyle = color;
+        ctx.fillRect(lx, ly - th, tw + 10, th + 4);
+        ctx.fillStyle = "#06121f";
+        ctx.textBaseline = "alphabetic";
+        ctx.textAlign = "left";
+        ctx.fillText(text, lx + 5, ly - 2);
+      }
+    }
+    ctx.restore();
+  }
+
+  // Frame info overlay (top-left of canvas)
+  const tag = `${f.stem}   ·   ${state.current + 1}/${state.frames.length}   ·   ${visible.length}/${(f.detections||[]).length} bolls`;
+  ctx.save();
+  ctx.font = `12px ui-monospace, "SF Mono", monospace`;
+  ctx.textBaseline = "top"; ctx.textAlign = "left";
+  const pad = 6;
+  const tw = ctx.measureText(tag).width;
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(8, 8, tw + pad * 2, 12 + pad * 2);
+  ctx.fillStyle = "#e6ecf5";
+  ctx.fillText(tag, 8 + pad, 8 + pad);
+  ctx.restore();
+}
+
+// =============================================================================
+//   NAVIGATION + PLAYBACK
+// =============================================================================
+async function goToFrame(idx, force = false) {
+  if (state.frames.length === 0) return;
+  idx = Math.max(0, Math.min(state.frames.length - 1, idx));
+  if (idx === state.current && !force) return;
+  state.current = idx;
+  state.selectedBollIdx = null;
+  const f = state.frames[idx];
+  if (f.imageUrl) await ensureImageLoaded(f);
+  $("scrub").value = String(idx);
+  $("counter").innerHTML = `<b>${idx + 1}</b> / ${state.frames.length}`;
+  // pre-load neighbors
+  if (state.frames[idx + 1]?.imageUrl) ensureImageLoaded(state.frames[idx + 1]);
+  if (state.frames[idx + 2]?.imageUrl) ensureImageLoaded(state.frames[idx + 2]);
+  render();
+  renderDetails();
+  renderFrameStats();
+}
+
+function play() {
+  if (state.playing) return;
+  state.playing = true;
+  $("play-btn").textContent = "⏸";
+  state.lastFrameTime = performance.now();
+  requestAnimationFrame(playLoop);
+}
+function pause() {
+  state.playing = false;
+  $("play-btn").textContent = "▶";
+}
+function togglePlay() { state.playing ? pause() : play(); }
+
+function playLoop(t) {
+  if (!state.playing) return;
+  const dt = t - state.lastFrameTime;
+  const interval = 1000 / (state.baseFps * state.speed);
+  if (dt >= interval) {
+    state.lastFrameTime = t - (dt - interval); // keep accumulated phase
+    let next = state.current + 1;
+    if (next >= state.frames.length) {
+      next = 0; // loop
+    }
+    goToFrame(next);
+  }
+  requestAnimationFrame(playLoop);
+}
+
+// =============================================================================
+//   SELECTION + DETAILS PANEL
+// =============================================================================
+function hitTest(canvasX, canvasY) {
+  const f = state.frames[state.current];
+  if (!f) return null;
+  // Convert from displayed canvas size back to image pixel coords.
+  const rect = cv.getBoundingClientRect();
+  // canvasX,Y are already in CSS pixel coords relative to canvas
+  const ix = canvasX * (cv.width / rect.width);
+  const iy = canvasY * (cv.height / rect.height);
+  // Iterate top-most last (so check in reverse for top picking)
+  const dets = f.detections || [];
+  for (let i = dets.length - 1; i >= 0; i--) {
+    const d = dets[i];
+    if (!passesFilter(d)) continue;
+    if (d.mask_poly && d.mask_poly.length >= 3) {
+      if (pointInPoly(ix, iy, d.mask_poly)) return i;
+    } else if (d.bbox) {
+      if (pointInBbox(ix, iy, d.bbox)) return i;
+    }
+  }
+  return null;
+}
+
+function renderDetails() {
+  const out = $("details");
+  const f = state.frames[state.current];
+  if (!f || state.selectedBollIdx == null) {
+    out.innerHTML = `<div class="details-empty">Click any boll on the canvas to see its full per-detection record here.</div>`;
+    return;
+  }
+  const d = f.detections[state.selectedBollIdx];
+  if (!d) {
+    out.innerHTML = `<div class="details-empty">Selection not found.</div>`;
+    return;
+  }
+  const cls = d.occ_class ?? "no_aux";
+  const color = colorFor(d);
+  const tip = (d.kpts && d.kpts[0]) || [null,null,0];
+  const base = (d.kpts && d.kpts[1]) || [null,null,0];
+  const tipConf = tip[2] ?? 0;
+  const baseConf = base[2] ?? 0;
+  const visfrac = d.visfrac;
+  const visBar = visfrac == null ? "" :
+    `<div class="bar"><div class="fill" style="width:${(visfrac*100).toFixed(0)}%; background:${color}"></div></div>`;
+  const confBar = d.det_conf == null ? "" :
+    `<div class="bar"><div class="fill" style="width:${(d.det_conf*100).toFixed(0)}%"></div></div>`;
+  const tipBar = `<div class="bar"><div class="fill" style="width:${(tipConf*100).toFixed(0)}%; background:${COLOR_TIP}"></div></div>`;
+  const baseBar = `<div class="bar"><div class="fill" style="width:${(baseConf*100).toFixed(0)}%; background:${COLOR_BASE}"></div></div>`;
+  const kThresh = state.filters.kptConfMin;
+  const tipLabel = tipConf >= kThresh ? "committed" : (tipConf > 0 ? "low conf (guessed)" : "not predicted");
+  const baseLabel = baseConf >= kThresh ? "committed" : (baseConf > 0 ? "low conf (guessed)" : "not predicted");
+  const trackChip = d.track_id != null
+    ? `<span style="float:right; padding:2px 8px; background:#0c121b; border:1px solid ${color}; color:${color}; border-radius:99px; font-size:11px; font-family:ui-monospace, 'SF Mono', monospace;">track #${d.track_id}</span>`
+    : "";
+  out.innerHTML = `
+    <div class="detail-class" style="color:${color}">
+      <span style="display:inline-block; width:10px; height:10px; background:${color}; border-radius:2px; margin-right:6px;"></span>
+      ${cls}  (boll #${state.selectedBollIdx})
+      ${trackChip}
+    </div>
+    <div class="detail-row"><span class="k">occ class</span><span class="v">${d.occ_class ?? "—"}</span></div>
+    <div class="detail-row"><span class="k">occ conf</span><span class="v">${d.occ_class_conf != null ? d.occ_class_conf.toFixed(3) : "—"}</span></div>
+    <div class="detail-row"><span class="k">visfrac</span><span class="v">${visfrac != null ? visfrac.toFixed(3) : "—"}</span></div>
+    ${visBar}
+    <div class="detail-row"><span class="k">det conf</span><span class="v">${d.det_conf != null ? d.det_conf.toFixed(3) : "—"}</span></div>
+    ${confBar}
+    <div class="detail-row"><span class="k">bbox x,y</span><span class="v">${fmt(d.bbox?.[0])}, ${fmt(d.bbox?.[1])}</span></div>
+    <div class="detail-row"><span class="k">bbox w,h</span><span class="v">${fmt(d.bbox?.[2])}, ${fmt(d.bbox?.[3])}</span></div>
+    <div class="detail-row"><span class="k">tip xy</span><span class="v">${fmt(tip[0])}, ${fmt(tip[1])}</span></div>
+    <div class="detail-row"><span class="k">tip conf</span><span class="v">${tipConf.toFixed(3)} (${tipLabel})</span></div>
+    ${tipBar}
+    <div class="detail-row"><span class="k">base xy</span><span class="v">${fmt(base[0])}, ${fmt(base[1])}</span></div>
+    <div class="detail-row"><span class="k">base conf</span><span class="v">${baseConf.toFixed(3)} (${baseLabel})</span></div>
+    ${baseBar}
+    <div class="detail-row"><span class="k">poly verts</span><span class="v">${d.mask_poly?.length ?? 0}</span></div>
+  `;
+}
+
+function renderFrameStats() {
+  const f = state.frames[state.current];
+  const out = $("frame-stats");
+  if (!f) { out.textContent = "No frame loaded."; return; }
+  const all = f.detections || [];
+  const visible = all.filter(passesFilter);
+  const byCls = {};
+  for (const d of visible) {
+    const c = d.occ_class ?? "_noaux";
+    byCls[c] = (byCls[c] || 0) + 1;
+  }
+  let html = `<div class="detail-row"><span class="k">total bolls</span><span class="v">${all.length}</span></div>`;
+  html += `<div class="detail-row"><span class="k">passing filter</span><span class="v">${visible.length}</span></div>`;
+  for (const c of ["none","leaf","stem","other","_noaux"]) {
+    if (!byCls[c]) continue;
+    html += `<div class="detail-row"><span class="k">
+      <span style="display:inline-block; width:8px; height:8px; background:${COLOR_BY_CLASS[c]}; border-radius:2px; margin-right:5px;"></span>
+      ${c}</span><span class="v">${byCls[c]}</span></div>`;
+  }
+  if (f.width) {
+    html += `<div class="detail-row"><span class="k">image px</span><span class="v">${f.width}×${f.height}</span></div>`;
+  }
+  out.innerHTML = html;
+}
+
+function fmt(v) {
+  if (v == null) return "—";
+  if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(1);
+  return String(v);
+}
+
+// =============================================================================
+//   EVENT WIRING
+// =============================================================================
+function init() {
+  // Load buttons
+  $("load-frames-btn").onclick = () => pickFolder("frames");
+  $("load-dets-btn").onclick   = () => pickFolder("dets");
+  $("load-frames-btn-2").onclick = () => pickFolder("frames");
+  $("load-dets-btn-2").onclick   = () => pickFolder("dets");
+
+  // Help
+  $("help-btn").onclick = () => {
+    showToast(
+      `Shortcuts:  Space=play/pause   ←/→=step   J/K=jump 10   Home/End=first/last   F=fit   +/-=speed`,
+      "ok", 4500
+    );
+  };
+
+  // Layer toggles
+  const wire = (id, prop) => {
+    const el = $(id);
+    el.addEventListener("change", () => { state.layers[prop] = el.checked; render(); });
+  };
+  wire("t-bbox","bbox"); wire("t-mask-fill","maskFill"); wire("t-mask-outline","maskOutline");
+  wire("t-kpt-tip","tip"); wire("t-kpt-base","base"); wire("t-axis","axis");
+  wire("t-label","label"); wire("t-lbl-cls","lblCls"); wire("t-lbl-v","lblV"); wire("t-lbl-d","lblD");
+  wire("t-track-id","trackId"); wire("t-trails","trails");
+
+  $("kpt-conf-min").addEventListener("input", (e) => {
+    state.filters.kptConfMin = parseFloat(e.target.value);
+    $("kpt-conf-min-v").textContent = state.filters.kptConfMin.toFixed(2);
+    render(); renderDetails();
+  });
+  $("trail-len").addEventListener("input", (e) => {
+    state.view.trailLen = parseInt(e.target.value, 10);
+    $("trail-len-v").textContent = String(state.view.trailLen);
+    render();
+  });
+
+  $("mask-alpha").addEventListener("input", (e) => {
+    state.view.maskAlpha = parseFloat(e.target.value);
+    $("mask-alpha-v").textContent = state.view.maskAlpha.toFixed(2);
+    render();
+  });
+
+  // Filters
+  $("conf-min").addEventListener("input", (e) => {
+    state.filters.confMin = parseFloat(e.target.value);
+    $("conf-min-v").textContent = state.filters.confMin.toFixed(2);
+    render(); renderFrameStats();
+  });
+  $("vis-min").addEventListener("input", (e) => {
+    state.filters.visMin = parseFloat(e.target.value);
+    $("vis-min-v").textContent = state.filters.visMin.toFixed(2);
+    render(); renderFrameStats();
+  });
+  document.querySelectorAll(".class-chip").forEach(chip => {
+    chip.onclick = () => {
+      const cls = chip.dataset.cls;
+      if (state.filters.classes.has(cls)) {
+        state.filters.classes.delete(cls);
+        chip.classList.add("off");
+      } else {
+        state.filters.classes.add(cls);
+        chip.classList.remove("off");
+      }
+      render(); renderFrameStats();
+    };
+  });
+
+  // View options
+  $("t-dim-unsel").addEventListener("change", (e) => { state.view.dimUnselected = e.target.checked; render(); });
+  $("t-fit").addEventListener("change", (e) => {
+    state.view.fitToWindow = e.target.checked;
+    if (state.view.fitToWindow) resetToFit(); else render();
+  });
+  $("snap-btn").onclick = () => {
+    const f = state.frames[state.current];
+    if (!f) return;
+    const a = document.createElement("a");
+    a.download = `${f.stem}_annotated.png`;
+    a.href = cv.toDataURL("image/png");
+    a.click();
+  };
+
+  // Footer
+  $("first-btn").onclick = () => goToFrame(0);
+  $("prev-btn").onclick  = () => goToFrame(state.current - 1);
+  $("next-btn").onclick  = () => goToFrame(state.current + 1);
+  $("last-btn").onclick  = () => goToFrame(state.frames.length - 1);
+  $("play-btn").onclick  = togglePlay;
+  $("scrub").addEventListener("input", (e) => { goToFrame(parseInt(e.target.value, 10)); });
+  $("speed-sel").addEventListener("change", (e) => { state.speed = parseFloat(e.target.value); });
+  $("fps-input").addEventListener("change", (e) => {
+    state.baseFps = Math.max(1, parseFloat(e.target.value) || 15);
+  });
+
+  // Canvas mouse interaction:
+  //   - mousedown + mouseup with <5px movement = click  -> select boll
+  //   - mousedown + drag > 5px                          -> pan (exits fit mode)
+  //   - wheel                                           -> zoom anchored at cursor
+  const DRAG_THRESHOLD = 5;
+  let drag = null;
+
+  cv.addEventListener("mousedown", (e) => {
+    if (state.frames.length === 0) return;
+    if (e.button !== 0) return;
+    drag = {
+      startX: e.clientX, startY: e.clientY,
+      panX0: state.view.panX, panY0: state.view.panY,
+      panned: false,
+    };
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    if (!drag.panned && Math.hypot(dx, dy) > DRAG_THRESHOLD) {
+      drag.panned = true;
+      state.view.fitToWindow = false;
+      $("t-fit").checked = false;
+      cv.classList.add("panning");
+    }
+    if (drag.panned) {
+      state.view.panX = drag.panX0 + dx;
+      state.view.panY = drag.panY0 + dy;
+      applyTransform();
+    }
+  });
+
+  document.addEventListener("mouseup", (e) => {
+    if (!drag) return;
+    const wasDrag = drag.panned;
+    drag = null;
+    cv.classList.remove("panning");
+    if (!wasDrag && state.frames.length > 0) {
+      const rect = cv.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      if (cx >= 0 && cy >= 0 && cx <= rect.width && cy <= rect.height) {
+        const idx = hitTest(cx, cy);
+        state.selectedBollIdx = idx;
+        render(); renderDetails();
+      }
+    }
+  });
+
+  // Wheel zoom anchored at cursor
+  cv.parentElement.addEventListener("wheel", (e) => {
+    if (state.frames.length === 0) return;
+    e.preventDefault();
+    const wrap = cv.parentElement;
+    const wrapRect = wrap.getBoundingClientRect();
+    const cx = e.clientX - wrapRect.left;
+    const cy = e.clientY - wrapRect.top;
+    const factor = e.deltaY > 0 ? 1 / 1.18 : 1.18;
+    setZoomAtPoint(state.view.zoom * factor, cx, cy);
+  }, { passive: false });
+
+  // Zoom buttons
+  $("zoom-in-btn").onclick  = () => setZoomFromCenter(state.view.zoom * 1.25);
+  $("zoom-out-btn").onclick = () => setZoomFromCenter(state.view.zoom / 1.25);
+  $("zoom-fit-btn").onclick = () => resetToFit();
+  $("zoom-100-btn").onclick = () => setZoomFromCenter(1.0);
+
+  // Keyboard
+  document.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+    switch (e.key) {
+      case " ": e.preventDefault(); togglePlay(); break;
+      case "ArrowLeft":  goToFrame(state.current - 1); break;
+      case "ArrowRight": goToFrame(state.current + 1); break;
+      case "j": case "J": goToFrame(state.current - 10); break;
+      case "k": case "K": goToFrame(state.current + 10); break;
+      case "Home": goToFrame(0); break;
+      case "End":  goToFrame(state.frames.length - 1); break;
+      case "f": case "F":
+        state.view.fitToWindow = !state.view.fitToWindow;
+        $("t-fit").checked = state.view.fitToWindow; render(); break;
+      case "0":
+        resetToFit(); break;
+      case "+": case "=":
+        $("speed-sel").selectedIndex = Math.min($("speed-sel").options.length - 1, $("speed-sel").selectedIndex + 1);
+        state.speed = parseFloat($("speed-sel").value); break;
+      case "-": case "_":
+        $("speed-sel").selectedIndex = Math.max(0, $("speed-sel").selectedIndex - 1);
+        state.speed = parseFloat($("speed-sel").value); break;
+    }
+  });
+
+  // Drag & drop folder
+  document.addEventListener("dragover", (e) => { e.preventDefault(); });
+  document.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    const items = e.dataTransfer.items;
+    if (!items) return;
+    const entries = [];
+    const promises = [];
+    for (const it of items) {
+      const entry = it.webkitGetAsEntry?.();
+      if (entry) promises.push(walkEntry(entry, "", entries));
+    }
+    await Promise.all(promises);
+    if (entries.length) ingestEntries(entries, "frames");
+  });
+
+  // Window resize → re-fit
+  window.addEventListener("resize", () => { if (state.frames.length) render(); });
+
+  // Initial state
+  $("mask-alpha-v").textContent = state.view.maskAlpha.toFixed(2);
+  $("conf-min-v").textContent = state.filters.confMin.toFixed(2);
+  $("vis-min-v").textContent = state.filters.visMin.toFixed(2);
+  $("kpt-conf-min-v").textContent = state.filters.kptConfMin.toFixed(2);
+  $("trail-len-v").textContent = String(state.view.trailLen);
+}
+
+function walkEntry(entry, base, out) {
+  return new Promise((resolve) => {
+    if (entry.isFile) {
+      entry.file((f) => {
+        out.push({ name: f.name, path: base + f.name, file: f });
+        resolve();
+      }, () => resolve());
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      const readAll = () => {
+        reader.readEntries(async (children) => {
+          if (!children.length) { resolve(); return; }
+          await Promise.all(children.map(c => walkEntry(c, base + entry.name + "/", out)));
+          readAll();
+        }, () => resolve());
+      };
+      readAll();
+    } else { resolve(); }
+  });
+}
+
+function showToast(msg, kind = "", timeout = 2200) {
+  toast.textContent = msg;
+  toast.className = "toast " + kind;
+  toast.style.display = "block";
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => { toast.style.display = "none"; }, timeout);
+}
+function setLoading(frac) {
+  if (frac == null) { loadingBar.style.display = "none"; return; }
+  loadingBar.style.display = "block";
+  loadingBar.style.width = Math.round(Math.min(1, Math.max(0, frac)) * 100) + "%";
+}
+
+init();
+</script>
+</body>
+</html>

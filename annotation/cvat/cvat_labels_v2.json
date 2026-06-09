@@ -1,0 +1,113 @@
+[
+  {
+    "name": "cotton_boll",
+    "id": 1,
+    "color": "#de8268",
+    "type": "polygon",
+    "attributes": [
+      {
+        "id": 1,
+        "name": "boll_id",
+        "input_type": "number",
+        "mutable": true,
+        "values": [
+          "0",
+          "999",
+          "1"
+        ],
+        "default_value": "0"
+      },
+      {
+        "id": 2,
+        "name": "tip_visibility",
+        "input_type": "select",
+        "mutable": true,
+        "values": [
+          "visible",
+          "guessed",
+          "unknown"
+        ],
+        "default_value": "visible"
+      },
+      {
+        "id": 3,
+        "name": "base_visibility",
+        "input_type": "select",
+        "mutable": true,
+        "values": [
+          "visible",
+          "guessed",
+          "unknown"
+        ],
+        "default_value": "visible"
+      },
+      {
+        "id": 11,
+        "name": "occluded_by",
+        "input_type": "select",
+        "mutable": true,
+        "values": [
+          "none",
+          "leaf",
+          "stem",
+          "other_boll",
+          "flower",
+          "other"
+        ],
+        "default_value": "none"
+      },
+      {
+        "id": 12,
+        "name": "annotation_type",
+        "input_type": "select",
+        "mutable": true,
+        "values": [
+          "whole_visible",
+          "visible_parts",
+          "whole_estimate"
+        ],
+        "default_value": "whole_visible"
+      }
+    ]
+  },
+  {
+    "name": "tip",
+    "id": 2,
+    "color": "#3d3df5",
+    "type": "points",
+    "attributes": [
+      {
+        "id": 4,
+        "name": "boll_id",
+        "input_type": "number",
+        "mutable": true,
+        "values": [
+          "0",
+          "999",
+          "1"
+        ],
+        "default_value": "0"
+      }
+    ]
+  },
+  {
+    "name": "base",
+    "id": 3,
+    "color": "#6f0584",
+    "type": "points",
+    "attributes": [
+      {
+        "id": 5,
+        "name": "boll_id",
+        "input_type": "number",
+        "mutable": true,
+        "values": [
+          "0",
+          "999",
+          "1"
+        ],
+        "default_value": "0"
+      }
+    ]
+  }
+]

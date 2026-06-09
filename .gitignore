@@ -1,5 +1,64 @@
+# ============================================================
+# depth_cotton_balls .gitignore
+# Rule of thumb: code + docs are tracked; data, weights, and
+# anything regenerable by the pipeline/training scripts is not.
+# READMEs inside ignored data folders ARE tracked so the repo
+# documents what belongs there.
+# ============================================================
+
+# ---- Python ----
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# ---- OS / editor cruft ----
 .DS_Store
+Thumbs.db
+.~lock.*
+*.tmp
 
-bags/
+# ---- Vendored third-party code (clone separately; see README) ----
+sam2/
 
+# ---- Model weights ----
+*.pt
+*.pth
+*.onnx
+models/*
+!models/README.md
+
+# ---- Raw RealSense recordings & video (GBs; not for git) ----
+bags/*
+!bags/README.md
+*.bag
+videos/
+*.mp4
+*.MP4
+*.avi
+
+# ---- SAM 2 pipeline outputs (regenerable from .bag files) ----
+work/*
+!work/README.md
 depth_results_rgbd/
+
+# ---- Training & inference outputs ----
+runs/
+_full_inference/
+_full_inference_v2/
+_full_inference_v3/
+interactive_viewer/
+
+# ---- Datasets (large; distributed separately, regenerable via scripts) ----
+new_dataset/
+combined_all_sequential/
+combined_all_sequential */
+annotation/datasets/
+annotation/pilot_v2/frames/
+annotation/pilot_v2/sam2_bootstrap_coco.json
+
+# ---- Archives & local scratch ----
+_archive/
+*.zip

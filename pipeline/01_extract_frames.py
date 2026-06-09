@@ -28,6 +28,18 @@ except ImportError:
     sys.exit("ERROR: pyrealsense2 not found. Install with: pip install pyrealsense2")
 
 
+import sys, os, cv2
+src, dst = sys.argv[1], sys.argv[2]
+os.makedirs(dst, exist_ok=True)
+cap = cv2.VideoCapture(src); i = 0
+while True:
+    ok, f = cap.read()
+    if not ok: break
+    cv2.imwrite(os.path.join(dst, f"frame_{i:06d}.jpg"), f, [cv2.IMWRITE_JPEG_QUALITY, 92])
+    i += 1
+print(f"wrote {i} frames")
+
+
 def extract(bag_path: str, out_dir: str, stride: int, jpeg_quality: int,
             recording_id: str):
     if not os.path.isfile(bag_path):
